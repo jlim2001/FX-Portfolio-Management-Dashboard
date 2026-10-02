@@ -2,7 +2,7 @@
 
 A Streamlit dashboard for an FX portfolio manager to monitor P&L and risk on a book of FX spot trades.
 
-**Live dashboard:** [_add the Streamlit Community Cloud URL here after deploying (steps below)._](https://fx-portfolio-management-dashboard-3crh3ryzox35uajehepqjp.streamlit.app/)
+**Live dashboard:** https://fx-portfolio-management-dashboard-3crh3ryzox35uajehepqjp.streamlit.app/
 
 ## Running it
 
