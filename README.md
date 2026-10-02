@@ -1,8 +1,8 @@
 # FX Portfolio Risk Dashboard
 
-A Streamlit dashboard for an FX portfolio manager to monitor P&L and risk on a book of FX spot trades. Everything is written in Python (pandas, NumPy, SciPy, Plotly).
+A Streamlit dashboard for an FX portfolio manager to monitor P&L and risk on a book of FX spot trades.
 
-**Live dashboard:** _add the Streamlit Community Cloud URL here after deploying (steps below)._
+**Live dashboard:** [_add the Streamlit Community Cloud URL here after deploying (steps below)._](https://fx-portfolio-management-dashboard-3crh3ryzox35uajehepqjp.streamlit.app/)
 
 ## Running it
 
