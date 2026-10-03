@@ -544,19 +544,42 @@ with tabs[6]:
                         use_container_width=True)
 
 with st.expander("Methodology"):
-    st.markdown(f"""
-**Valuation.** Each trade is two cash legs: +N base and −N×entry quote. Its USD value is
-N·u(base) − N·K·u(quote), where u(c) is USD per unit of c. This equals N·(S − K) converted to USD at the live quote rate.
-Daily P&L is the change in that value since the {mkt.prev_date} close.
+    k_ = R_pos["k"]
+    st.markdown(md(f"""
+**Prices.** {mkt.source.split(' (')[0]}. Every rate is held as u(c) = USD per 1 unit of currency c, and any pair is
+u(base) ÷ u(quote), so crosses are triangulated from the same USD rates. History: {len(mkt.hist)} daily closes from
+{mkt.hist.index[0]}.
 
-**Risk factors.** Daily returns of each currency against USD. Crosses such as EURGBP split into their EUR and GBP legs, so
-offsetting exposures net across trades. For spot, scenario P&L = Σ exposure × return is exact. It is not a delta approximation.
+**Valuation and P&L.** Each trade is two cash amounts: +N of the base currency and −N×K of the quote currency
+(K = entry price). Its USD value is N·u(base) − N·K·u(quote), which equals N·(S − K) converted to USD at the live
+quote-currency rate. *P&L since inception* is that value at live prices. *P&L today* is the change since the
+{mkt.prev_date} close. A trade booked after that close counts its whole P&L as today's.
 
-**VaR.** Historical simulation revalues today's book over the last {window} daily moves. VaR is the {R_pos['k']}th worst
-outcome and ES is the mean of the {R_pos['k']} worst. Parametric VaR = z·√(e′Σe) with a zero-mean covariance, either
-equal-weight or EWMA (λ = {lam}). Multi-day horizons scale by √h.
+**Risk factors and exposures.** The risk factors are the daily % moves of each currency against USD. Each trade becomes
+USD exposures, x(base) = N·u(base) and x(quote) = −N·K·u(quote), which net across trades. A day's P&L is
+Σ exposure × move. For spot this is exact, the same as repricing every trade.
 
-**Decomposition.** Component VaR uses Euler allocation. Parametric: z·xᵢ′Σe/σ. Historical: each trade's average P&L in
-scenarios ranked near the VaR scenario, rescaled to sum to VaR. Marginal VaR = component ÷ notional.
-Incremental VaR is a full with/without recalculation.
-""")
+**VaR and expected shortfall.**
+- *Historical simulation*: today's exposures are applied to each of the last {window} daily moves. VaR is the
+  {ordinal(k_)} worst of those {window} outcomes; ES is the average of the {k_} worst.
+- *Parametric*: VaR = z·√(e′Σe), using a zero-mean covariance Σ that is equal-weight or EWMA (λ = {lam}).
+  ES = σ·φ(z)/(1 − confidence).
+
+Multi-day horizons scale the 1-day figure by √h.
+
+**Breaking VaR down.**
+- *Component VaR* (Euler allocation) sums to portfolio VaR. Parametric: z·xᵢ′Σe/σ. Historical: each trade's average
+  P&L over the scenarios ranked near the VaR scenario ({ordinal(max(1, k_ - k_ // 2))} to
+  {ordinal(k_ + max(1, k_ // 2))} worst), rescaled so the components sum to VaR.
+- *Marginal VaR* = component VaR ÷ USD notional × $1mm: the extra VaR from adding $1mm to the trade.
+- *Incremental VaR* = VaR with the trade minus VaR without it, recalculated in full.
+- *Component ES* = each trade's average P&L over the {k_} worst scenarios. It sums exactly to historical ES.
+
+**VaR limit.** Usage = VaR on the limit's own fixed measure ({lim_label}, {lim_cfg.window}-day look-back) ÷ the limit.
+Changing the analysis settings does not change it.
+
+**Best hedges.** For each currency, the trade against USD that minimises parametric variance: −(Σe)ᵢ ÷ Σᵢᵢ.
+
+**Backtest.** Walk-forward: each of the last 250 days gets a VaR computed only from the {window} days before it,
+compared with today's book's P&L on that day. The Kupiec test and the Basel traffic light judge the exception count.
+"""))
