@@ -1,0 +1,2 @@
+trade_id,trade_date,currency_pair,side,notional,book
+M1,2026-06-01,EURUSD,BUY,10000000,Test
