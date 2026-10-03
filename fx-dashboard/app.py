@@ -92,36 +92,58 @@ def pct_label(x: float) -> str:
 
 # ---------- data ----------
 
-@st.cache_data(ttl=900, show_spinner="Loading market data…")
-def get_market(source: str):
-    return load_market(source)
+@st.cache_data(ttl=900, show_spinner="Loading prices from Yahoo Finance…")
+def get_market():
+    return load_market("auto"), pd.Timestamp.now(tz="UTC")
 
+
+def source_status(m, fallbacks: list[str], fetched: pd.Timestamp) -> tuple[str, str]:
+    """(level, message) describing which price source is in use right now, and why."""
+    age = (pd.Timestamp.now(tz="UTC") - m.live_time).total_seconds() / 60
+    when = f"{m.live_time:%d %b %H:%M} UTC"
+    age_s = f"{age:.0f} min old" if age < 120 else f"{age / 60:.0f} h old"
+    if m.source.startswith("Yahoo"):
+        now = pd.Timestamp.now(tz="UTC")
+        # FX trades 24h from Sunday ~21:00 UTC to Friday ~21:00 UTC.
+        closed = now.dayofweek == 5 or (now.dayofweek == 6 and now.hour < 21) or (now.dayofweek == 4 and now.hour >= 21)
+        state = f"FX markets are closed for the weekend, so this is the last quote of the week ({when})" if closed \
+            else f"Live intraday quotes as of {when} ({age_s})"
+        return "ok", (f"**Yahoo Finance** is the price source. {state}. "
+                      f"Fetched {fetched:%H:%M} UTC; refreshes every 15 minutes.")
+    why = fallbacks[0] if fallbacks else "Yahoo Finance did not respond"
+    if m.source.startswith("ECB"):
+        return "warn", (f"**ECB reference rates** (16:00 CET daily fixing, {when}). {why}, so the app fell back to ECB. "
+                        "Prices do not move during the day; P&L today compares the last two fixings.")
+    return "error", (f"**Bundled snapshot** from {when}. Yahoo Finance and ECB both failed ({'; '.join(fallbacks)}). "
+                     "Prices are a stored copy and will not update until a live source responds.")
+
+
+(mkt, fallbacks), fetched_at = get_market()
+src_level, src_msg = source_status(mkt, fallbacks, fetched_at)
 
 with st.sidebar:
     st.header("Market data")
-    src_label = st.selectbox("Source", ["Live (Yahoo, then ECB)", "Yahoo Finance", "ECB reference rates", "Bundled snapshot"],
-                             key="src")
-    source = {"Live (Yahoo, then ECB)": "auto", "Yahoo Finance": "yahoo", "ECB reference rates": "ecb",
-              "Bundled snapshot": "snapshot"}[src_label]
+    {"ok": st.success, "warn": st.warning, "error": st.error}[src_level](src_msg)
+    st.caption(f"Previous close {mkt.prev_date} · {len(mkt.hist)} daily closes from {mkt.hist.index[0]}")
     if st.button("Refresh prices", use_container_width=True):
         get_market.clear()
-
-mkt, mkt_warnings = get_market(source)
-
-with st.sidebar:
-    st.caption(f"{mkt.source}  \nPrices as of **{mkt.live_time:%d %b %Y %H:%M} UTC** · "
-               f"previous close {mkt.prev_date} · {len(mkt.hist)} daily closes from {mkt.hist.index[0]}")
-    for w in mkt_warnings:
-        st.warning(w, icon="⚠️")
+        st.rerun()
 
     st.header("Portfolio")
     upload = st.file_uploader("Upload a trade file (CSV)", type="csv",
                               help="Columns: " + ", ".join(REQUIRED) + ", book (optional). Notional is in the base currency.")
-    book_all, load_errors = load_portfolio(upload if upload else SAMPLE, mkt.currencies)
-    book_all, mkt_errors, mkt_warnings = check_against_market(book_all, mkt)
-    load_errors += mkt_errors
-    st.caption(f"{'Uploaded file' if upload else 'Sample book (data/portfolio.csv)'} · {len(book_all)} trades loaded")
-    if load_errors:
+    use_sample = upload is None and st.session_state.get("use_sample", False)
+    if upload is not None or use_sample:
+        book_all, load_errors = load_portfolio(upload if upload is not None else SAMPLE, mkt.currencies)
+        book_all, mkt_errors, mkt_warnings = check_against_market(book_all, mkt)
+        load_errors += mkt_errors
+        st.caption(f"{upload.name if upload is not None else 'Sample book'} · {len(book_all)} trade(s) loaded")
+    else:
+        book_all, load_errors, mkt_warnings = pd.DataFrame(), [], []
+    if use_sample and st.button("Clear sample book", use_container_width=True):
+        st.session_state["use_sample"] = False
+        st.rerun()
+    if load_errors and len(book_all):
         with st.expander(f"{len(load_errors)} row(s) rejected", expanded=True):
             for e in load_errors:
                 st.error(e)
@@ -160,19 +182,67 @@ conf_s = pct_label(conf)
 var_label = f"{conf_s} {horizon}d"
 
 st.title("FX Portfolio Risk")
-if book.empty:
-    st.info("No trades to show. Upload a trade file or select at least one book in the sidebar.")
+
+
+def format_guide():
+    st.markdown("**Expected format**: one row per trade, comma-separated, with a header row.")
+    st.dataframe(pd.DataFrame([
+        ["trade_id", "Unique id", "T001"], ["trade_date", "YYYY-MM-DD, not in the future", "2026-03-16"],
+        ["currency_pair", "Two of USD, " + ", ".join(mkt.currencies), "EURUSD or EUR/USD"],
+        ["side", "BUY or SELL (of the base currency)", "BUY"],
+        ["notional", "Positive, in the base currency", "25,000,000"],
+        ["entry_price", "Quote currency per 1 base", "1.14303"], ["book", "Optional grouping", "Macro"],
+    ], columns=["Column", "Rules", "Example"]), hide_index=True, use_container_width=True)
+    st.download_button("Download a template CSV", SAMPLE.read_bytes(), "portfolio_template.csv", "text/csv")
+
+
+if upload is None and not use_sample:
+    st.markdown("Upload a trade file in the sidebar to see P&L and risk for the book.")
+    format_guide()
+    if st.button("Or try it with the sample book (16 trades)"):
+        st.session_state["use_sample"] = True
+        st.rerun()
     st.stop()
 
-pos, X = rk.value_positions(book, mkt)
-A = rk.analyse(pos, X, mkt, cfg)
-R_pos, R_ccy, exposure = A["pos"], A["ccy"], A["exposure"]
-items = R_pos["items"]
-# The limit is always measured on its own fixed definition, not the analysis settings.
-limit_var = R_pos["var"] if lim_cfg == cfg else rk.risk_report(X, mkt.returns, lim_cfg)["var"]
+if book_all.empty:
+    st.error(md(f"**{upload.name if upload is not None else 'The file'} could not be used.** "
+                + ("No valid trades were found." if load_errors else "It has a header row but no trades.")))
+    if load_errors:
+        st.markdown("**What was wrong**")
+        for e in load_errors[:25]:
+            st.markdown(md(f"- {e}"))
+        if len(load_errors) > 25:
+            st.caption(f"…and {len(load_errors) - 25} more.")
+    format_guide()
+    st.stop()
+
+if book.empty:
+    st.info("No trades in the selected books. Select at least one book in the sidebar.")
+    st.stop()
+
+if load_errors:
+    st.warning(md(f"{len(load_errors)} row(s) of {upload.name if upload is not None else 'the file'} were rejected and are "
+                  f"left out of every figure below. The sidebar lists each one."))
+
+try:
+    pos, X = rk.value_positions(book, mkt)
+    A = rk.analyse(pos, X, mkt, cfg)
+    R_pos, R_ccy, exposure = A["pos"], A["ccy"], A["exposure"]
+    items = R_pos["items"]
+    # The limit is always measured on its own fixed definition, not the analysis settings.
+    limit_var = R_pos["var"] if lim_cfg == cfg else rk.risk_report(X, mkt.returns, lim_cfg)["var"]
+except Exception as exc:  # last line of defence: never show a raw traceback for a bad book
+    st.error("The risk calculation failed for this portfolio. Check the trades in the file, or try the template.")
+    with st.expander("Technical details"):
+        st.code(f"{type(exc).__name__}: {exc}")
+    format_guide()
+    st.stop()
 
 st.caption(f"{len(pos)} trades across {pos.book.nunique()} book(s) · {method_label}, {var_label}, "
-           f"{R_pos['window_start']} → {R_pos['window_end']} ({window} scenarios)")
+           f"{R_pos['window_start']} → {R_pos['window_end']} ({window} scenarios) · "
+           f"Prices: {mkt.source.split(' (')[0]}, {mkt.live_time:%d %b %H:%M} UTC vs {mkt.prev_date} close")
+if src_level != "ok":
+    {"warn": st.warning, "error": st.error}[src_level](src_msg)
 
 # ---------- headline ----------
 
@@ -199,7 +269,7 @@ if limit and util > 1:
 elif limit and util > 0.85:
     st.warning(md(f"{lim_label} is at {util:.0%} of the {usd(limit)} limit."))
 
-tabs = st.tabs(["Positions", "Risk decomposition", "Exposure & hedging", "Stress tests", "VaR backtest",
+tabs = st.tabs(["Positions", "Risk decomposition", "Exposure & hedging", "VaR backtest",
                 "P&L history", "What-if trade", "Market"])
 
 # ---------- positions ----------
@@ -339,32 +409,11 @@ with tabs[2]:
     st.caption(md(f"Each row is the trade in one currency against USD that most reduces portfolio variance: "
                f"−(Σe)ᵢ / Σᵢᵢ under the {'EWMA' if method == 'ewma' else 'equal-weight'} covariance. "
                f"VaR shown is parametric ({usd(R_pos['normal_var'])} before hedging). Proxy hedges such as SGD for "
-               "EUR work through correlation, so check them against the stress tests."))
-
-# ---------- stress ----------
-
-with tabs[3]:
-    summary, by_trade = rk.stress_tests(X, mkt)
-    srt = summary["P&L"].sort_values()
-    fig = go.Figure(go.Bar(x=srt.values, y=srt.index, orientation="h", marker_color=[GAIN if v > 0 else LOSS for v in srt],
-                           hovertemplate="%{y}<br>$%{x:,.0f}<extra></extra>"))
-    fig.add_vline(x=-R_pos["var"], line_dash="dot", line_color=MUTED)
-    fig.add_annotation(x=-R_pos["var"], y=1.02, yref="paper", text=f"−VaR {var_label}", showarrow=False,
-                       font=dict(size=11, color=MUTED))
-    fig.update_yaxes(tickfont=dict(size=12))
-    st.plotly_chart(fig_layout(fig, 360, title="Scenario P&L, today's book", showlegend=False), use_container_width=True)
-    st.dataframe(styled(summary[["Type", "Period", "P&L", "Shocks"]], {"P&L": "{:+,.0f}"}, ["P&L"]),
-                 use_container_width=True)
-    st.caption("Historical episodes apply each currency's actual move between the two closes. "
-               "Hypothetical shocks move USD per unit of each currency. Revaluation is exact for spot.")
-    pick = st.selectbox("Breakdown by trade", summary.index, key="stress_pick")
-    bt_df = pd.DataFrame({"Pair": pos.currency_pair, "Side": pos.side, "Book": pos.book, "Scenario P&L": by_trade[pick]})
-    st.dataframe(styled(bt_df.sort_values("Scenario P&L"), {"Scenario P&L": "{:+,.0f}"}, ["Scenario P&L"]),
-                 use_container_width=True)
+               "EUR work through correlation and carry basis risk."))
 
 # ---------- backtest ----------
 
-with tabs[4]:
+with tabs[3]:
     bt = rk.backtest(exposure, mkt, rk.RiskConfig(method, conf, 1, window, lam), 250)
     if bt["n"] < 20:
         st.info(f"A {window}-day look-back leaves only {bt['n']} days to test. Choose a shorter look-back.")
@@ -388,7 +437,7 @@ with tabs[4]:
 
 # ---------- history ----------
 
-with tabs[5]:
+with tabs[4]:
     h = rk.pnl_history(book, mkt)
     d = h.diff().fillna(h.iloc[0])
     fig = go.Figure()
@@ -411,7 +460,7 @@ with tabs[5]:
 
 # ---------- what-if ----------
 
-with tabs[6]:
+with tabs[5]:
     st.markdown("Test a trade against the current book before you execute it. It is priced at the live mid.")
     ccys = ["USD"] + mkt.currencies
     with st.form("whatif"):
@@ -434,13 +483,12 @@ with tabs[6]:
         book2 = pd.concat([book, new], ignore_index=True)
         pos2, X2 = rk.value_positions(book2, mkt)
         A2 = rk.analyse(pos2, X2, mkt, cfg)
-        st2, _ = rk.stress_tests(X2, mkt)
-        st1 = summary["P&L"]
         it = A2["pos"]["items"].loc["WHAT-IF"]
         c = st.columns(4)
         c[0].metric(f"VaR {var_label}", usd(A2["pos"]["var"]), usd(A2["pos"]["var"] - R_pos["var"], True), delta_color="inverse")
         c[1].metric("Expected shortfall", usd(A2["pos"]["es"]), usd(A2["pos"]["es"] - R_pos["es"], True), delta_color="inverse")
-        c[2].metric("Worst stress", usd(st2["P&L"].min()), usd(st2["P&L"].min() - st1.min(), True))
+        c[2].metric("Trade's component VaR", usd(it.component, True), f"{it.pct_of_var:.0%} of new VaR", delta_color="off",
+                    help="Positive adds to portfolio VaR; negative means the trade hedges the book.")
         lim2 = rk.risk_report(X2, mkt.returns, lim_cfg)["var"]
         c[3].metric("Limit used", f"{lim2 / limit:.0%}" if limit else "–",
                     f"{(lim2 - limit_var) / limit:+.0%}" if limit else None, delta_color="inverse",
@@ -455,15 +503,16 @@ with tabs[6]:
         left, right = st.columns(2)
         left.markdown("**Net currency exposure (USD)**")
         left.dataframe(styled(cmp, {"Before": "{:+,.0f}", "After": "{:+,.0f}", "Change": "{:+,.0f}"}), use_container_width=True)
-        sc = pd.DataFrame({"Before": st1, "After": st2["P&L"]})
-        sc["Change"] = sc.After - sc.Before
-        right.markdown("**Stress P&L (USD)**")
-        right.dataframe(styled(sc, {"Before": "{:+,.0f}", "After": "{:+,.0f}", "Change": "{:+,.0f}"}, ["Change"]),
+        cv = pd.DataFrame({"Before": R_ccy["items"].component, "After": A2["ccy"]["items"].component})
+        cv["Change"] = cv.After - cv.Before
+        cv = cv[(cv.abs() > 1).any(axis=1)]
+        right.markdown(f"**Component VaR by currency ({var_label})**")
+        right.dataframe(styled(cv, {"Before": "{:+,.0f}", "After": "{:+,.0f}", "Change": "{:+,.0f}"}),
                         use_container_width=True)
 
 # ---------- market ----------
 
-with tabs[7]:
+with tabs[6]:
     rets = mkt.returns
     rows = []
     for c_ in mkt.currencies:

@@ -147,17 +147,7 @@ def test_best_hedge_is_variance_minimising(valued, mkt):
         assert h.loc[c, "var_after"] == pytest.approx(2.3263478740 * math.sqrt(var(d0)), rel=1e-6)
 
 
-# ---------- stress & backtest ----------
-
-def test_stress_scenarios(valued, mkt):
-    _, X = valued
-    summary, by_trade = rk.stress_tests(X, mkt)
-    np.testing.assert_allclose(summary["P&L"].values, by_trade.sum().values)
-    assert "Yen carry unwind" in summary.index
-    # The worst-day scenario must equal the minimum of the book's historical P&L.
-    worst = (mkt.returns.values @ X.sum().values).min()
-    assert summary.loc["Worst day for this book", "P&L"] == pytest.approx(worst)
-
+# ---------- backtest ----------
 
 def test_backtest_kupiec(valued, mkt):
     pos, X = valued

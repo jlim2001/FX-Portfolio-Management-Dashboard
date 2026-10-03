@@ -84,15 +84,17 @@ def _yahoo_series(ccy: str, years: int) -> tuple[pd.Series, float, int]:
 
 
 def fetch_yahoo(years: int = 3) -> MarketData:
-    today = dt.datetime.now(dt.timezone.utc).date().isoformat()
-    hist, live, stamps = {}, {}, []
+    raw, live, stamps = {}, {}, []
     for ccy in CURRENCIES:
-        s, lv, ts = _yahoo_series(ccy, years)
-        hist[ccy] = s[s.index < today]  # today's bar is still moving: use the live quote instead
-        live[ccy] = lv
+        raw[ccy], live[ccy], ts = _yahoo_series(ccy, years)
         stamps.append(ts)
-    return MarketData(_clean(pd.DataFrame(hist)), pd.Series({**live, "USD": 1.0}),
-                      pd.Timestamp(min(stamps), unit="s", tz="UTC"),
+    live_time = pd.Timestamp(min(stamps), unit="s", tz="UTC")
+    # The bar for the live quote's own session is still moving (or, at a weekend,
+    # equals the live quote): keep only earlier closes, so "previous close" is the
+    # close before the session the live quote belongs to.
+    session = (live_time + pd.Timedelta(hours=1)).strftime("%Y-%m-%d")  # London date of the quote
+    hist = {c: s[s.index < session] for c, s in raw.items()}
+    return MarketData(_clean(pd.DataFrame(hist)), pd.Series({**live, "USD": 1.0}), live_time,
                       "Yahoo Finance (daily closes; live = latest intraday quote)")
 
 
