@@ -111,7 +111,7 @@ def risk_report(X: pd.DataFrame, R: pd.DataFrame, cfg: RiskConfig) -> dict:
     v_n, es_n = z * sigma * s, sigma * norm.pdf(z) / (1 - cfg.conf) * s
 
     if cfg.method == "hs":
-        var, es = v_hs * s, es_hs * s
+        var, es = v_hs * s + 0.0, es_hs * s + 0.0  # + 0.0 turns -0.0 into 0.0 for display
         standalone = np.array([hs_var(Pi[:, i], cfg.conf)[0] for i in range(Pi.shape[1])]) * s
         incremental = var - np.array([hs_var(Pp - Pi[:, i], cfg.conf)[0] for i in range(Pi.shape[1])]) * s
         # Smoothed Euler estimator: average each item's P&L over the scenarios
@@ -119,7 +119,9 @@ def risk_report(X: pd.DataFrame, R: pd.DataFrame, cfg: RiskConfig) -> dict:
         # sum to portfolio VaR exactly (a single-scenario estimate is too noisy).
         m = max(1, k // 2)
         band = order[max(0, k - 1 - m): k + m]
-        component = Pi[band].mean(axis=0) / Pp[band].mean() * var
+        pp_band = Pp[band].mean()
+        # A fully hedged book has zero P&L in every scenario: nothing to allocate.
+        component = Pi[band].mean(axis=0) / pp_band * var if abs(pp_band) > EPS else np.zeros(Pi.shape[1])
     else:
         var, es = v_n, es_n
         quad = lambda A: np.sqrt(np.maximum(np.einsum("ij,jk,ik->i", A, S, A), 0))

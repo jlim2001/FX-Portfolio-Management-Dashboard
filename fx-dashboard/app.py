@@ -11,7 +11,7 @@ import streamlit as st
 
 from fxrisk import risk as rk
 from fxrisk.market import USD_QUOTED, load_market
-from fxrisk.portfolio import REQUIRED, SAMPLE, load_portfolio
+from fxrisk.portfolio import REQUIRED, SAMPLE, check_against_market, load_portfolio
 
 st.set_page_config(page_title="FX Portfolio Risk", layout="wide", initial_sidebar_state="expanded")
 
@@ -118,9 +118,17 @@ with st.sidebar:
     upload = st.file_uploader("Upload a trade file (CSV)", type="csv",
                               help="Columns: " + ", ".join(REQUIRED) + ", book (optional). Notional is in the base currency.")
     book_all, load_errors = load_portfolio(upload if upload else SAMPLE, mkt.currencies)
-    st.caption(f"{'Uploaded file' if upload else 'Sample book (data/portfolio.csv)'} · {len(book_all)} trades")
-    for e in load_errors:
-        st.error(e)
+    book_all, mkt_errors, mkt_warnings = check_against_market(book_all, mkt)
+    load_errors += mkt_errors
+    st.caption(f"{'Uploaded file' if upload else 'Sample book (data/portfolio.csv)'} · {len(book_all)} trades loaded")
+    if load_errors:
+        with st.expander(f"{len(load_errors)} row(s) rejected", expanded=True):
+            for e in load_errors:
+                st.error(e)
+    if mkt_warnings:
+        with st.expander(f"{len(mkt_warnings)} off-market price(s)", expanded=False):
+            for w in mkt_warnings:
+                st.warning(w)
     books = sorted(book_all.book.unique()) if len(book_all) else []
     sel_books = st.multiselect("Books", books, default=books, key="books")
 
