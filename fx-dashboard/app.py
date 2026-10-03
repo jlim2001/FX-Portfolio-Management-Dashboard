@@ -543,6 +543,10 @@ with tabs[6]:
         st.plotly_chart(fig_layout(fig, 470, title=f"Correlation of USD returns ({'EWMA' if method == 'ewma' else f'{window}d'})"),
                         use_container_width=True)
 
+def ordinal(n: int) -> str:
+    return f"{n}{'th' if 11 <= n % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
 with st.expander("Methodology"):
     k_ = R_pos["k"]
     st.markdown(md(f"""
