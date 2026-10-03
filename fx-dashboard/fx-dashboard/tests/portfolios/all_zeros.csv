@@ -1,5 +1,0 @@
-trade_id,trade_date,currency_pair,side,notional,entry_price,book
-Z1,2026-06-01,EURUSD,BUY,0,0,Test
-Z2,2026-06-01,USDJPY,SELL,0,0,Test
-Z3,2026-06-01,GBPUSD,BUY,0,1.30,Test
-Z4,2026-06-01,AUDUSD,BUY,1000000,0,Test

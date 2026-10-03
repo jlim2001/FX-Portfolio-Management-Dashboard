@@ -1,3 +1,0 @@
-trade_id,trade_date,currency_pair,side,notional,entry_price
-A,2026-06-01,EURUSD,BUY,1000000,1.1,extra,more,fields
-B,2026-06-01

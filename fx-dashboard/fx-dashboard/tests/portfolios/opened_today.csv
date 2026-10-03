@@ -1,3 +1,0 @@
-trade_id,trade_date,currency_pair,side,notional,entry_price,book
-OLD,2026-09-01,USDJPY,BUY,5000000,150.000,Test
-NEW,2026-10-02,USDJPY,BUY,5000000,150.000,Test

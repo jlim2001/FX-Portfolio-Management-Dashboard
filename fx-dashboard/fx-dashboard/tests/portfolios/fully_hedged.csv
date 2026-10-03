@@ -1,3 +1,0 @@
-trade_id,trade_date,currency_pair,side,notional,entry_price,book
-H1,2026-06-01,EURUSD,BUY,10000000,1.10000,Test
-H2,2026-06-01,EURUSD,SELL,10000000,1.10000,Test

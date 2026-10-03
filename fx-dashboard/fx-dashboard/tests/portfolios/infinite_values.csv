@@ -1,4 +1,0 @@
-trade_id,trade_date,currency_pair,side,notional,entry_price
-A,2026-06-01,EURUSD,BUY,inf,1.1
-B,2026-06-01,EURUSD,BUY,1e400,1.1
-C,2026-06-01,EURUSD,BUY,1000000,inf
