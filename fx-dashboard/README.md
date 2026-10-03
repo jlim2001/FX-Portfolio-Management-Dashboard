@@ -153,7 +153,7 @@ The risk factors are the 12 simple daily returns R(c) of u(c). Each trade maps t
 ## What I would add with more time
 1. **More products:** FX forwards and NDFs (forward points, discounting, carry P&L), then vanilla options with delta, gamma and vega, and full-revaluation VaR.
 2. **Filtered historical simulation:** scale historical returns by current EWMA volatility. Add stressed VaR on a fixed crisis window and Monte Carlo VaR.
-3. **Stress testing:** revalue the book under extreme historical episodes (2008, the 2015 CHF de-peg, the 2024 yen carry unwind) and hypothetical shocks (USD ±5%, risk-off). This needs a longer price history than the current 3 years. An early version was built and left out to keep the dashboard focused.
+3. **Stress testing:** revalue the book under extreme historical episodes (2008, the 2015 CHF de-peg, the 2024 yen carry unwind) and hypothetical shocks (USD ±5%, risk-off). This needs a longer price history than the current 3 years.
 4. **P&L attribution:** split each day's P&L into spot move, carry and new trades, by book and by currency.
 5. **FX style analytics:** measure the book's exposure to carry, momentum, value, dollar and risk-on/off styles; split VaR and P&L by style; track how each style is performing. Carry needs the interest-rate data from item 1. Momentum and dollar could be built from the existing price history.
 6. **Data and trade capture:** a database (Postgres or SQLite) for trades with an audit trail, end-of-day risk snapshots for trend charts, a licensed real-time feed (Refinitiv or Bloomberg) and a check that compares the two sources. This will also increase the available price history.
