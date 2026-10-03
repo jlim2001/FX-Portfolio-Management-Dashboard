@@ -9,7 +9,7 @@ A Streamlit dashboard for an FX portfolio manager to monitor P&L and risk on a b
 ```bash
 pip install -r requirements.txt
 streamlit run app.py          # opens http://localhost:8501
-python -m pytest -q           # 22 tests, run offline against the bundled snapshot
+python -m pytest -q           # 45 tests, run offline against the bundled snapshot
 ```
 
 **Deploying to Streamlit Community Cloud (free):**
@@ -47,7 +47,18 @@ python -m pytest -q           # 22 tests, run offline against the bundled snapsh
 - longs and shorts, including a partial unwind (T014);
 - a trade dated yesterday and one dated today.
 
-Entry prices are the actual close on each trade date plus a small random execution offset (`scripts/make_sample_portfolio.py`). Any CSV with these columns can be uploaded in the app. Pairs can be written `EURUSD` or `EUR/USD`.
+Entry prices are the actual close on each trade date plus a small random execution offset (`scripts/make_sample_portfolio.py`). Any CSV with these columns can be uploaded in the app. Pairs can be written `EURUSD`, `EUR/USD` or `eur-usd`, and notionals as `1,000,000` or `1_000_000`.
+
+Uploads are validated row by row, and each bad row is rejected with its own message. Rows are rejected for:
+- an unsupported or malformed pair;
+- a side other than BUY or SELL;
+- a notional or price that is not positive;
+- an invalid date;
+- a blank or duplicate `trade_id`;
+- a trade dated after today's prices;
+- an entry price more than 25% from the market on the trade date. An inverted quote gets a hint saying so.
+
+Entry prices more than 3% off-market are accepted but flagged. `tests/portfolios/` holds edge-case files that exercise each of these.
 
 **Market data:** `fxrisk/market.py`. Three years of daily closes plus a live quote for 12 currencies against USD. The app tries sources in this order and caches the result for 15 minutes:
 1. **Yahoo Finance** chart API: daily closes plus the latest intraday quote.
@@ -120,6 +131,7 @@ The risk factors are the 12 simple daily returns R(c) of u(c). Each trade maps t
 - **The backtest uses hypothetical P&L.** It tests today's book over history, which validates the model, not past trading.
 - **Best-hedge suggestions can be proxy hedges.** A suggestion such as selling SGD against a EUR long works only through correlation and carries basis risk. Check it against the stress tests.
 - **Coverage is 12 currencies plus USD.** Uploaded trades in other currencies are rejected with a message. Trade dates have no time of day.
+- **Row numbers in upload errors can be off by one per blank line.** The CSV reader skips blank lines before numbering rows. Each message also names the trade_id, so the row can still be found.
 - **No persistence.** Uploaded portfolios and what-if trades last only for the browser session.
 
 ## What I would add with more time
@@ -143,4 +155,6 @@ scripts/refresh_snapshot.py  refresh the snapshot from live sources
 scripts/make_sample_portfolio.py  how the sample book was generated
 tests/test_risk.py           hand calculations, Euler additivity, finite-difference marginal VaR,
                              exact-revaluation check, hedge optimality, Kupiec, input validation
+tests/test_portfolios.py     edge-case portfolio files: one trade, fully hedged, inverse pairs,
+tests/portfolios/            crosses vs legs, malformed and invalid files (see its README)
 ```
