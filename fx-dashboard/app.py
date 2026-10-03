@@ -72,13 +72,22 @@ def price_fmt(pair: str) -> str:
 
 
 def fig_layout(fig: go.Figure, height=340, **kw) -> go.Figure:
-    fig.update_layout(height=height, margin=dict(l=8, r=8, t=44, b=8), paper_bgcolor="rgba(0,0,0,0)",
-                      plot_bgcolor="rgba(0,0,0,0)", font=dict(size=12), hoverlabel=dict(font_size=12),
-                      title_x=0, title_y=0.98, title_yanchor="top",
-                      legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="right", x=1), **kw)
+    layout = dict(height=height, margin=dict(l=8, r=8, t=44, b=8), paper_bgcolor="rgba(0,0,0,0)",
+                  plot_bgcolor="rgba(0,0,0,0)", font=dict(size=12), hoverlabel=dict(font_size=12),
+                  title_x=0, title_y=0.98, title_yanchor="top",
+                  legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="right", x=1))
+    fig.update_layout(**{**layout, **kw})
     fig.update_xaxes(gridcolor=GRID, zerolinecolor=GRID)
     fig.update_yaxes(gridcolor=GRID, zerolinecolor=MUTED)
     return fig
+
+
+METHODS = {"Historical simulation": "hs", "Parametric (normal)": "normal", "Parametric (EWMA)": "ewma"}
+METHOD_SHORT = {"hs": "historical", "normal": "normal", "ewma": "EWMA"}
+
+
+def pct_label(x: float) -> str:
+    return f"{x:.1%}".replace(".0%", "%")
 
 
 # ---------- data ----------
@@ -116,18 +125,30 @@ with st.sidebar:
     sel_books = st.multiselect("Books", books, default=books, key="books")
 
     st.header("Risk settings")
-    method_label = st.radio("VaR method", ["Historical simulation", "Parametric (normal)", "Parametric (EWMA)"], key="method")
-    method = {"Historical simulation": "hs", "Parametric (normal)": "normal", "Parametric (EWMA)": "ewma"}[method_label]
+    method_label = st.radio("VaR method", list(METHODS), key="method")
+    method = METHODS[method_label]
     c1, c2 = st.columns(2)
-    conf = c1.selectbox("Confidence", [0.95, 0.975, 0.99], index=2, format_func=lambda x: f"{x:.1%}".replace(".0%", "%"), key="conf")
+    conf = c1.selectbox("Confidence", [0.95, 0.975, 0.99], index=2, format_func=pct_label, key="conf")
     horizon = c2.selectbox("Horizon (days)", [1, 5, 10], index=0, key="horizon")
     window = st.select_slider("Look-back (trading days)", [250, 500, 750], value=500, key="window")
     lam = st.slider("EWMA decay λ", 0.90, 0.99, 0.94, 0.01, key="lam") if method == "ewma" else 0.94
-    limit = st.number_input("VaR limit (USD)", min_value=0, value=1_000_000, step=50_000, key="limit")
+
+    st.header("VaR limit")
+    limit = st.number_input("Limit (USD)", min_value=0, value=1_000_000, step=50_000, key="limit")
+    with st.expander("Measured on", expanded=False):
+        st.caption("A limit is set on one VaR measure. Limit usage always uses this measure, so changing the "
+                   "risk settings above does not change it.")
+        lim_method_label = st.selectbox("Method", list(METHODS), index=0, key="lim_method")
+        l1, l2 = st.columns(2)
+        lim_conf = l1.selectbox("Confidence", [0.95, 0.975, 0.99], index=2, format_func=pct_label, key="lim_conf")
+        lim_horizon = l2.selectbox("Horizon (days)", [1, 5, 10], index=0, key="lim_horizon")
+        lim_window = st.select_slider("Look-back (trading days)", [250, 500, 750], value=500, key="lim_window")
 
 cfg = rk.RiskConfig(method, conf, horizon, window, lam)
+lim_cfg = rk.RiskConfig(METHODS[lim_method_label], lim_conf, lim_horizon, lim_window, 0.94)
+lim_label = f"{pct_label(lim_conf)} {lim_horizon}-day {METHOD_SHORT[lim_cfg.method]} VaR"
 book = book_all[book_all.book.isin(sel_books)].reset_index(drop=True) if len(book_all) else book_all
-conf_s = f"{conf:.1%}".replace(".0%", "%")
+conf_s = pct_label(conf)
 var_label = f"{conf_s} {horizon}d"
 
 st.title("FX Portfolio Risk")
@@ -139,6 +160,8 @@ pos, X = rk.value_positions(book, mkt)
 A = rk.analyse(pos, X, mkt, cfg)
 R_pos, R_ccy, exposure = A["pos"], A["ccy"], A["exposure"]
 items = R_pos["items"]
+# The limit is always measured on its own fixed definition, not the analysis settings.
+limit_var = R_pos["var"] if lim_cfg == cfg else rk.risk_report(X, mkt.returns, lim_cfg)["var"]
 
 st.caption(f"{len(pos)} trades across {pos.book.nunique()} book(s) · {method_label}, {var_label}, "
            f"{R_pos['window_start']} → {R_pos['window_end']} ({window} scenarios)")
@@ -151,16 +174,22 @@ k[1].metric("P&L today", usd(pos.pnl_day.sum(), True), help=f"Live prices vs the
             "Trades booked since that close count their full P&L.")
 k[2].metric(f"VaR {var_label}", usd(R_pos["var"]))
 k[3].metric(f"Expected shortfall", usd(R_pos["es"]), help="Average loss beyond VaR at the same confidence.")
-util = R_pos["var"] / limit if limit else np.nan
+util = limit_var / limit if limit else np.nan
 k[4].metric("VaR limit used", f"{util:.0%}" if limit else "–",
-            delta=f"{usd(limit - R_pos['var'])} headroom" if limit and util <= 1 else (f"{usd(R_pos['var'] - limit)} over" if limit else None),
-            delta_color="normal" if util <= 1 else "inverse")
+            delta=(f"{usd(limit - limit_var)} headroom" if util <= 1 else f"{usd(limit_var - limit)} over") if limit else None,
+            delta_color="normal" if util <= 1 else "inverse",
+            help=md(f"{usd(limit_var)} of {lim_label} against a {usd(limit)} limit. The limit measure is set under "
+                    "VaR limit in the sidebar and does not follow the risk settings."))
 k[5].metric("Gross notional", f"${pos.usd_notional.sum() / 1e6:,.0f}mm",
             help="Sum of absolute base-currency notionals in USD.")
+if limit:
+    st.caption(md(f"Limit: {usd(limit)} on {lim_label} ({lim_cfg.window}-day look-back). "
+                  f"Current {lim_label}: {usd(limit_var)}."))
 if limit and util > 1:
-    st.error(md(f"VaR of {usd(R_pos['var'])} is above the {usd(limit)} limit. The Exposure & hedging tab lists the single trades that cut risk most."))
+    st.error(md(f"{lim_label} of {usd(limit_var)} is above the {usd(limit)} limit. "
+                "The Exposure & hedging tab lists the single trades that cut risk most."))
 elif limit and util > 0.85:
-    st.warning(md(f"VaR is at {util:.0%} of the {usd(limit)} limit."))
+    st.warning(md(f"{lim_label} is at {util:.0%} of the {usd(limit)} limit."))
 
 tabs = st.tabs(["Positions", "Risk decomposition", "Exposure & hedging", "Stress tests", "VaR backtest",
                 "P&L history", "What-if trade", "Market"])
@@ -247,15 +276,21 @@ with tabs[1]:
     with left:
         p = R_pos["pnl"] * cfg.scale
         fig = go.Figure(go.Histogram(x=p.values, nbinsx=60, marker_color=ACCENT, opacity=0.75,
-                                     hovertemplate="P&L $%{x:,.0f}<br>%{y} days<extra></extra>", name="Scenario P&L"))
-        for x, name, dash in [(-R_pos["hs_var"], f"HS VaR {usd(R_pos['hs_var'])}", "solid"),
-                              (-R_pos["hs_es"], f"HS ES {usd(R_pos['hs_es'])}", "dot"),
-                              (-R_pos["normal_var"], f"Normal VaR {usd(R_pos['normal_var'])}", "dash")]:
-            fig.add_vline(x=x, line_color=LOSS, line_dash=dash, line_width=1.5)
-            fig.add_annotation(x=x, y=1, yref="paper", text=name, showarrow=False, xanchor="right", yanchor="top",
-                               textangle=-90, font=dict(size=11, color=LOSS))
-        st.plotly_chart(fig_layout(fig, 360, title=f"Today's book revalued over {window} historical days"
-                                   + (f" (×√{horizon})" if horizon > 1 else ""), showlegend=False), use_container_width=True)
+                                     hovertemplate="P&L $%{x:,.0f}<br>%{y} days<extra></extra>", name="Scenario P&L", showlegend=False))
+        top = np.histogram(p.values, bins=60)[0].max() * 1.08
+        for x, name, color, dash in [(-R_pos["hs_var"], f"HS VaR {usd(R_pos['hs_var'])}", LOSS, "solid"),
+                                     (-R_pos["hs_es"], f"HS ES {usd(R_pos['hs_es'])}", "#7a1f17", "dot"),
+                                     (-R_pos["normal_var"], f"Normal VaR {usd(R_pos['normal_var'])}", "#c98500", "dash")]:
+            fig.add_scatter(x=[x, x], y=[0, top], mode="lines", name=name, line=dict(color=color, dash=dash, width=2),
+                            hovertemplate=f"{name}<extra></extra>")
+        fig.add_annotation(x=0, y=1.0, xref="paper", yref="paper", text="← losses", showarrow=False,
+                           xanchor="left", yanchor="top", font=dict(size=11, color=MUTED))
+        fig.update_xaxes(title="Scenario P&L (USD)")
+        fig.update_yaxes(title="Days")
+        st.plotly_chart(fig_layout(fig, 380, title=f"Today's book revalued over {window} historical days"
+                                   + (f" (×√{horizon})" if horizon > 1 else ""), showlegend=True,
+                                   legend=dict(orientation="v", yanchor="top", y=0.98, xanchor="right", x=0.99,
+                                               bgcolor="rgba(255,255,255,0.75)")), use_container_width=True)
     with right:
         st.markdown(f"**VaR by method** ({var_label})")
         cmp = rk.compare_methods(X, mkt, cfg)
@@ -339,7 +374,7 @@ with tabs[4]:
                     name="Hypothetical P&L", hovertemplate="%{x}<br>P&L $%{y:,.0f}<extra></extra>")
         fig.add_scatter(x=s.index, y=-s["var"], mode="lines", line=dict(color=ACCENT, width=2), name=f"−VaR {conf_s} 1d",
                         hovertemplate="%{x}<br>−VaR $%{y:,.0f}<extra></extra>")
-        st.plotly_chart(fig_layout(fig, 380, title="Daily P&L of today's book vs the prior day's VaR"), use_container_width=True)
+        st.plotly_chart(fig_layout(fig, 380, title="Walk-forward backtest: each day's P&L vs VaR from the prior window only"), use_container_width=True)
         st.caption("Each day's VaR uses only data available before that day. P&L is what today's positions would "
                    "have made: a test of the model, not of past trading.")
 
@@ -398,7 +433,10 @@ with tabs[6]:
         c[0].metric(f"VaR {var_label}", usd(A2["pos"]["var"]), usd(A2["pos"]["var"] - R_pos["var"], True), delta_color="inverse")
         c[1].metric("Expected shortfall", usd(A2["pos"]["es"]), usd(A2["pos"]["es"] - R_pos["es"], True), delta_color="inverse")
         c[2].metric("Worst stress", usd(st2["P&L"].min()), usd(st2["P&L"].min() - st1.min(), True))
-        c[3].metric("Limit used", f"{A2['pos']['var'] / limit:.0%}" if limit else "–")
+        lim2 = rk.risk_report(X2, mkt.returns, lim_cfg)["var"]
+        c[3].metric("Limit used", f"{lim2 / limit:.0%}" if limit else "–",
+                    f"{(lim2 - limit_var) / limit:+.0%}" if limit else None, delta_color="inverse",
+                    help=md(f"Measured on {lim_label}, the limit's own definition."))
         st.caption(md(f"{side.title()} {notional:,.0f} {base} vs {quote} at {spot:,.5g} "
                    f"(${pos2.loc['WHAT-IF', 'usd_notional']:,.0f} USD notional). "
                    f"Standalone VaR {usd(it.standalone)}, component VaR {usd(it.component, True)} "

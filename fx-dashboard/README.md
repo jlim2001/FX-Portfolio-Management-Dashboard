@@ -23,7 +23,7 @@ python -m pytest -q           # 22 tests, run offline against the bundled snapsh
 
 | Area | Contents |
 |---|---|
-| Headline | P&L since inception, P&L today, VaR, expected shortfall, VaR-limit usage, gross notional. A banner appears when VaR passes 85% or 100% of the limit. |
+| Headline | P&L since inception, P&L today, VaR, expected shortfall, VaR-limit usage, gross notional. A banner appears when usage passes 85% or 100%. |
 | Positions | Every trade: entry price, live spot, move since entry, USD notional, daily and inception P&L, standalone and component VaR. A by-book summary follows. |
 | Risk decomposition | Component VaR by trade and by currency. Position table with standalone, component, marginal (per $1mm) and incremental VaR, plus component ES. Diversification benefit. Scenario P&L histogram with HS VaR, HS ES and normal VaR marked. VaR under all three methods side by side. |
 | Exposure & hedging | Net USD-equivalent exposure per currency, including the implied USD leg. Best single-currency hedges ranked by VaR reduction. |
@@ -38,7 +38,7 @@ python -m pytest -q           # 22 tests, run offline against the bundled snapsh
 - Portfolio CSV upload, with row-level validation messages.
 - Book filter.
 - VaR method, confidence (95 / 97.5 / 99%), horizon (1 / 5 / 10 days), look-back (250 / 500 / 750 days) and EWMA λ.
-- VaR limit.
+- VaR limit, with the measure it is set on (default $1mm on 99% 1-day historical VaR over 500 days). Limit usage always uses that measure, so changing the analysis settings never changes it. Viewing 95% VaR does not make the book look further from its limit.
 
 ## Data
 
