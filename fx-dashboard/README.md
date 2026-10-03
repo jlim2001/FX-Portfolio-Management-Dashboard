@@ -2,7 +2,7 @@
 
 A Streamlit dashboard for an FX portfolio manager to monitor P&L and risk on a book of FX spot trades. Everything is written in Python (pandas, NumPy, SciPy, Plotly).
 
-**Live dashboard:** _add the Streamlit Community Cloud URL here after deploying (steps below)._
+**Live dashboard:** https://fx-portfolio-management-dashboard-3crh3ryzox35uajehepqjp.streamlit.app/
 
 ## Running it
 
@@ -154,10 +154,11 @@ The risk factors are the 12 simple daily returns R(c) of u(c). Each trade maps t
 1. **More products:** FX forwards and NDFs (forward points, discounting, carry P&L), then vanilla options with delta, gamma and vega, and full-revaluation VaR.
 2. **Filtered historical simulation:** scale historical returns by current EWMA volatility. Add stressed VaR on a fixed crisis window and Monte Carlo VaR.
 3. **P&L attribution:** split each day's P&L into spot move, carry and new trades, by book and by currency.
-4. **Data and trade capture:** a database (Postgres or SQLite) for trades with an audit trail, end-of-day risk snapshots for trend charts, a licensed real-time feed (Refinitiv or Bloomberg) and a check that compares the two sources.
-5. **Limits and alerts:** per-book VaR and stop-loss limits, notional limits per currency, and email or Slack alerts on breaches.
-6. **More analytics:** factor or PCA views (USD factor, risk-on/risk-off), liquidity-adjusted VaR using bid/ask and market depth, and an optimiser for hedges using several currencies under cost constraints.
-7. **Engineering:** login with per-user books, background price refresh, and CI running the test suite.
+4. **FX Style Analytics:** get style exposure of current book and monitor how styles are performing.
+5. **Data and trade capture:** a database (Postgres or SQLite) for trades with an audit trail, end-of-day risk snapshots for trend charts, a licensed real-time feed (Refinitiv or Bloomberg) and a check that compares the two sources.
+6. **Limits and alerts:** per-book VaR and stop-loss limits, notional limits per currency, and email or Slack alerts on breaches.
+7. **More analytics:** factor or PCA views (USD factor, risk-on/risk-off), liquidity-adjusted VaR using bid/ask and market depth, and an optimiser for hedges using several currencies under cost constraints.
+8. **Engineering:** login with per-user books, background price refresh, and CI running the test suite.
 
 ## Project layout
 ```
