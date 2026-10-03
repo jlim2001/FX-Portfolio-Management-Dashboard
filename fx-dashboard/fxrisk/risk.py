@@ -185,50 +185,6 @@ def best_hedges(report: dict, exposure: pd.Series, m: MarketData, cfg: RiskConfi
     return out.sort_values("reduction", ascending=False)
 
 
-# ---------- stress testing ----------
-
-COMMODITY_EM = {"AUD", "NZD", "CAD", "NOK", "MXN", "ZAR"}
-HISTORICAL_EPISODES = [
-    ("Yen carry unwind", "2024-07-10", "2024-08-05"),
-    ("US tariff shock", "2025-04-02", "2025-04-11"),
-    ("US election move", "2024-11-05", "2024-11-06"),
-]
-
-
-def _episode_shock(m: MarketData, start: str, end: str):
-    idx = m.hist.index
-    i0, i1 = idx.searchsorted(start), idx.searchsorted(end, side="right") - 1
-    if i0 >= len(idx) or i1 <= i0:
-        return None, None, None
-    return m.hist.iloc[i1] / m.hist.iloc[i0] - 1, idx[i0], idx[i1]
-
-
-def stress_tests(X: pd.DataFrame, m: MarketData) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Return (scenario summary, trade x scenario P&L). Revaluation is exact for spot."""
-    C = m.currencies
-    scen = {
-        ("USD rallies 5% vs all", "Hypothetical", ""): pd.Series(1 / 1.05 - 1, index=C),
-        ("USD sells off 5% vs all", "Hypothetical", ""): pd.Series(1 / 0.95 - 1, index=C),
-        ("Risk-off: JPY, CHF +6%; commodity & EM FX −8%; others −1%", "Hypothetical", ""):
-            pd.Series({c: 0.06 if c in ("JPY", "CHF") else -0.08 if c in COMMODITY_EM else -0.01 for c in C}),
-        ("EUR −5% vs USD, others unchanged", "Hypothetical", ""): pd.Series({c: -0.05 if c == "EUR" else 0.0 for c in C}),
-    }
-    for name, a, b in HISTORICAL_EPISODES:
-        shock, d0, d1 = _episode_shock(m, a, b)
-        if shock is not None:
-            scen[(name, "Historical", f"{d0} → {d1}")] = shock
-    # The single worst day for today's book anywhere in the history.
-    R = m.returns
-    worst = (R.values @ X.sum(axis=0).values).argmin()
-    scen[("Worst day for this book", "Historical", f"{m.hist.index[worst]} → {R.index[worst]}")] = R.iloc[worst]
-
-    by_trade = pd.DataFrame({k[0]: X.values @ v[C].values for k, v in scen.items()}, index=X.index)
-    summary = pd.DataFrame([{"Scenario": k[0], "Type": k[1], "Period": k[2], "P&L": by_trade[k[0]].sum(),
-                             "Shocks": ", ".join(f"{c} {r:+.1%}" for c, r in shock[C].items() if abs(r) >= 0.005)}
-                            for k, shock in scen.items()]).set_index("Scenario")
-    return summary, by_trade
-
-
 # ---------- backtesting ----------
 
 def backtest(exposure: pd.Series, m: MarketData, cfg: RiskConfig, days: int = 250) -> dict:

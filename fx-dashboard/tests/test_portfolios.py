@@ -34,7 +34,6 @@ def full_run(book, mkt, method="hs"):
     cfg = rk.RiskConfig(method)
     a = rk.analyse(pos, X, mkt, cfg)
     a["positions"], a["X"] = pos, X
-    a["stress"], _ = rk.stress_tests(X, mkt)
     a["backtest"] = rk.backtest(a["exposure"], mkt, cfg, 250)
     a["hedges"] = rk.best_hedges(a["pos"], a["exposure"], mkt, cfg)
     a["history"] = rk.pnl_history(book, mkt)
@@ -45,7 +44,7 @@ def assert_all_finite(a):
     items = a["pos"]["items"]
     assert np.isfinite(items.drop(columns="marginal_per_mm").values).all(), items
     assert np.isfinite([a["pos"]["var"], a["pos"]["es"]]).all()
-    assert np.isfinite(a["stress"]["P&L"]).all() and np.isfinite(a["history"]).all()
+    assert np.isfinite(a["history"]).all()
     assert np.isfinite(a["hedges"][["hedge_usd", "var_after", "reduction"]].values).all()
 
 
@@ -73,7 +72,7 @@ def test_single_trade(mkt, method):
 
 @pytest.mark.parametrize("method", METHODS)
 def test_fully_hedged_book_has_zero_risk(mkt, method):
-    """Buy and sell the same amount at the same price: zero P&L, exposure, VaR, stress. No NaNs."""
+    """Buy and sell the same amount at the same price: zero P&L, exposure and VaR. No NaNs."""
     book, errors, _ = load("fully_hedged.csv", mkt)
     assert not errors and len(book) == 2
     a = full_run(book, mkt, method)
@@ -91,7 +90,6 @@ def test_fully_hedged_book_has_zero_risk(mkt, method):
         assert st.iloc[0] != pytest.approx(st.iloc[1])
     else:
         assert st.iloc[0] == pytest.approx(st.iloc[1])
-    assert np.allclose(a["stress"]["P&L"], 0, atol=1e-6)
     assert a["backtest"]["exceptions"] == 0
     assert_all_finite(a)
 
@@ -212,13 +210,17 @@ def test_all_zeros_rejects_every_row(mkt):
 @pytest.mark.parametrize("name, message", [
     ("empty_file.csv", "The file is empty."),
     ("header_only.csv", None),
-    ("missing_column.csv", "Missing column(s): entry_price."),
+    ("missing_column.csv", "Missing column(s): entry_price. Columns found: trade_id, trade_date"),
 ])
 def test_files_with_no_usable_trades(mkt, name, message):
     book, errors, warnings = load(name, mkt)
     assert book.empty and list(book.columns)[:6] == ["trade_id", "trade_date", "currency_pair", "side",
                                                      "notional", "entry_price"]
-    assert errors == ([message] if message else []) and warnings == []
+    assert warnings == []
+    if message:
+        assert len(errors) == 1 and errors[0].startswith(message)
+    else:
+        assert errors == []
 
 
 def test_missing_book_column_defaults(mkt):
@@ -255,3 +257,35 @@ def test_sample_book_passes_market_checks(mkt):
     book, errors = load_portfolio(currencies=mkt.currencies)
     book, mkt_errors, warnings = check_against_market(book, mkt)
     assert len(book) == 16 and not errors and not mkt_errors and not warnings
+
+
+# ---------- malformed files (must never raise) ----------
+
+@pytest.mark.parametrize("name, trades, message", [
+    ("excel_renamed.csv", 0, "This looks like an Excel workbook"),
+    ("not_a_portfolio.csv", 0, "Missing column(s): trade_id"),
+    ("ragged_rows.csv", 0, "Row 2: has 9 values but the header has 6 columns."),
+    ("infinite_values.csv", 0, "Row 2 (A): notional must be a positive number"),
+    ("semicolon_separated.csv", 1, None),   # ; delimiter and 1,10 decimal comma both understood
+    ("utf16_encoded.csv", 1, None),
+])
+def test_malformed_files(mkt, name, trades, message):
+    book, errors, _ = load(name, mkt)
+    assert len(book) == trades
+    if message:
+        assert errors and errors[0].startswith(message), errors
+    else:
+        assert errors == []
+    if trades:
+        assert book.entry_price.iloc[0] == pytest.approx(1.10)
+
+
+def test_row_numbers_match_file_lines(mkt):
+    """Errors cite the line in the file, even after blank lines."""
+    import io
+    csv = ("trade_id,trade_date,currency_pair,side,notional,entry_price\n"
+           "A,2026-06-01,EURUSD,BUY,1000000,1.10\n"
+           "\n\n"
+           "B,2026-06-01,EURUSD,HOLD,1000000,1.10\n")
+    _, errors = load_portfolio(io.StringIO(csv), mkt.currencies)
+    assert errors == ["Row 5 (B): side must be BUY or SELL."]
